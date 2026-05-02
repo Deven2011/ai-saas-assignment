@@ -1,6 +1,7 @@
 import {
   createProductInstance,
-  getProductInstances
+  getProductInstances,
+  updateProductInstance
 } from "@/lib/services/productInstanceService";
 
 export async function GET(req: Request) {
@@ -40,6 +41,48 @@ export async function POST(req: Request) {
 
     return Response.json(
       { error: "Failed to create product instance" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PUT(req: Request) {
+  try {
+    const body = await req.json();
+    const { productInstanceId, integrations } = body;
+
+    if (!productInstanceId) {
+      return Response.json(
+        { error: "productInstanceId is required" },
+        { status: 400 }
+      );
+    }
+
+    if (!integrations) {
+      return Response.json(
+        { error: "integrations is required" },
+        { status: 400 }
+      );
+    }
+
+    const productInstance = await updateProductInstance({
+      productInstanceId,
+      integrations
+    });
+
+    if (!productInstance) {
+      return Response.json(
+        { error: "Product instance not found" },
+        { status: 404 }
+      );
+    }
+
+    return Response.json(productInstance);
+  } catch (error) {
+    console.error("Failed to update product instance:", error);
+
+    return Response.json(
+      { error: "Failed to update product instance" },
       { status: 500 }
     );
   }

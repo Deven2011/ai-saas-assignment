@@ -1,6 +1,10 @@
+import { AIService } from "@/lib/ai/aiService";
+import PromptBuilder from "@/lib/ai/promptBuilder";
 import { connectDB } from "@/lib/db/connect";
 import Conversation from "@/lib/models/Conversation";
 import ProductInstance from "@/lib/models/ProductInstance";
+import AppError from "@/lib/utils/AppError";
+import { logger } from "@/lib/utils/logger";
 
 type SendMessageData = {
   projectId: string;
@@ -8,35 +12,23 @@ type SendMessageData = {
   message: string;
 };
 
-function createMockAIResponse(message: string, context: string[]) {
-  const responseContext = [message, ...context].filter(Boolean).join(" | ");
+type ConversationHistoryMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
 
-  return `AI Response based on: ${responseContext}`;
-}
+type ResponseSource = "integration-orders" | "integration-leads" | "ai";
 
 export async function sendMessage({
   projectId,
   productInstanceId,
   message
 }: SendMessageData) {
-  if (!projectId) {
-    throw new Error("projectId is required");
-  }
-
-  if (!productInstanceId) {
-    throw new Error("productInstanceId is required");
-  }
-
-  if (!message) {
-    throw new Error("message is required");
-  }
-
   await connectDB();
 
-  console.log("Incoming:", {
+  logger.info("Chat message received:", {
     projectId,
-    productInstanceId,
-    message
+    productInstanceId
   });
 
   let conversation = await Conversation.findOne({
@@ -45,7 +37,7 @@ export async function sendMessage({
   });
 
   if (!conversation) {
-    console.log("Creating new conversation:", {
+    logger.info("Creating new conversation:", {
       projectId,
       productInstanceId
     });
@@ -61,42 +53,77 @@ export async function sendMessage({
     conversation.messages = [];
   }
 
-  conversation.messages.push({
-    role: "user",
-    content: message
-  });
+  const history: ConversationHistoryMessage[] = conversation.messages.map(
+    (item: ConversationHistoryMessage) => ({
+      role: item.role,
+      content: item.content
+    })
+  );
 
   const productInstance = await ProductInstance.findOne({
     _id: productInstanceId,
     projectId
   });
 
-  console.log("Fetched product instance for chat:", productInstance);
-
   if (!productInstance) {
-    throw new Error("Product instance not found");
+    logger.error("Product instance not found:", {
+      projectId,
+      productInstanceId
+    });
+
+    throw new AppError("Product instance not found", 404);
   }
 
-  const context: string[] = [];
+  const lowerMessage = message.toLowerCase();
+  let responseText: string;
+  let responseSource: ResponseSource;
 
-  if (productInstance?.integrations?.shopify) {
-    context.push("User has Shopify data");
+  logger.info("Chat decision context:", {
+    message,
+    lowerMessage,
+    integrations: productInstance.integrations
+  });
+
+  if (lowerMessage.includes("orders") && productInstance.integrations?.shopify) {
+    responseText = "Here are your latest orders: Order #123, Order #456";
+    responseSource = "integration-orders";
+  } else if (
+    lowerMessage.includes("leads") &&
+    productInstance.integrations?.crm
+  ) {
+    responseText = "Here are your CRM leads: Lead A, Lead B";
+    responseSource = "integration-leads";
+  } else {
+    const aiService = new AIService();
+    const promptBuilder = new PromptBuilder();
+
+    const prompt = promptBuilder.buildPrompt({
+      history,
+      integrations: productInstance.integrations,
+      userMessage: message
+    });
+
+    const aiResponse = await aiService.generateResponse({
+      messages: prompt
+    });
+
+    responseText = aiResponse.text;
+    responseSource = "ai";
   }
 
-  if (productInstance?.integrations?.crm) {
-    context.push("User has CRM data");
-  }
+  logger.info("Response source:", responseSource);
 
-  const aiResponse = createMockAIResponse(message, context);
-
-  console.log("Generated mock AI response:", aiResponse);
+  conversation.messages.push({
+    role: "user",
+    content: message
+  });
 
   conversation.messages.push({
     role: "assistant",
-    content: aiResponse
+    content: responseText
   });
 
   await conversation.save();
 
-  return conversation;
+  return { text: responseText };
 }

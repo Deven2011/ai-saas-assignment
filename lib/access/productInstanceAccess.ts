@@ -17,3 +17,14 @@ export async function createProductInstanceRecord(data: ProductInstanceData) {
 export async function findProductInstancesByProjectId(projectId: string) {
   return await ProductInstance.find({ projectId });
 }
+
+export async function updateProductInstanceIntegrations(
+  productInstanceId: string,
+  integrations: ProductInstanceData["integrations"]
+) {
+  return await ProductInstance.findByIdAndUpdate(
+    productInstanceId,
+    { integrations },
+    { new: true }
+  );
+}
