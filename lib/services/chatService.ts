@@ -4,7 +4,6 @@ import { connectDB } from "@/lib/db/connect";
 import Conversation from "@/lib/models/Conversation";
 import ProductInstance from "@/lib/models/ProductInstance";
 import AppError from "@/lib/utils/AppError";
-import { logger } from "@/lib/utils/logger";
 
 type SendMessageData = {
   projectId: string;
@@ -17,8 +16,6 @@ type ConversationHistoryMessage = {
   content: string;
 };
 
-type ResponseSource = "integration-orders" | "integration-leads" | "ai";
-
 export async function sendMessage({
   projectId,
   productInstanceId,
@@ -26,22 +23,12 @@ export async function sendMessage({
 }: SendMessageData) {
   await connectDB();
 
-  logger.info("Chat message received:", {
-    projectId,
-    productInstanceId
-  });
-
   let conversation = await Conversation.findOne({
     projectId,
     productInstanceId
   });
 
   if (!conversation) {
-    logger.info("Creating new conversation:", {
-      projectId,
-      productInstanceId
-    });
-
     conversation = await Conversation.create({
       projectId,
       productInstanceId,
@@ -66,33 +53,19 @@ export async function sendMessage({
   });
 
   if (!productInstance) {
-    logger.error("Product instance not found:", {
-      projectId,
-      productInstanceId
-    });
-
     throw new AppError("Product instance not found", 404);
   }
 
   const lowerMessage = message.toLowerCase();
   let responseText: string;
-  let responseSource: ResponseSource;
-
-  logger.info("Chat decision context:", {
-    message,
-    lowerMessage,
-    integrations: productInstance.integrations
-  });
 
   if (lowerMessage.includes("orders") && productInstance.integrations?.shopify) {
     responseText = "Here are your latest orders: Order #123, Order #456";
-    responseSource = "integration-orders";
   } else if (
     lowerMessage.includes("leads") &&
     productInstance.integrations?.crm
   ) {
     responseText = "Here are your CRM leads: Lead A, Lead B";
-    responseSource = "integration-leads";
   } else {
     const aiService = new AIService();
     const promptBuilder = new PromptBuilder();
@@ -108,10 +81,7 @@ export async function sendMessage({
     });
 
     responseText = aiResponse.text;
-    responseSource = "ai";
   }
-
-  logger.info("Response source:", responseSource);
 
   conversation.messages.push({
     role: "user",
